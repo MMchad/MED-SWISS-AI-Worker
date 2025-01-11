@@ -1,8 +1,12 @@
-name = "med-ai"
+# wrangler.toml
+name = "mediswiss-ai-worker"
 main = "src/worker.js"
-compatibility_date = "2024-12-19"
-workers_dev = true
-preview_urls = false
+compatibility_date = "2024-01-06"
 
-[observability]
+# Enable logging
+[observability.logs]
 enabled = true
+
+# Public variables
+[vars]
+API_URL = "https://mediswiss.ai/wp-json/custom/v1"
