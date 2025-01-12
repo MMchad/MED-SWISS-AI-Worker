@@ -1,145 +1,149 @@
-import { config } from '../config/config';
-import { validateUser } from '../services/wordpress';
+// handlers/auth.js
 import { createResponse, log } from '../utils/utils';
 
-// Base64Url encoding helper
-function base64UrlEncode(str) {
-  return btoa(str)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
+export async function handleAuth(request, env, requestId) {
+    try {
+        const { username, password } = await request.json();
 
-// Decode base64Url
-function base64UrlDecode(str) {
-  str = str.replace(/-/g, '+').replace(/_/g, '/');
-  while (str.length % 4) {
-    str += '=';
-  }
-  return atob(str);
-}
+        if (!username || !password) {
+            log(requestId, 'Missing credentials');
+            return createResponse(400, 'Username and password required');
+        }
 
-async function generateToken(payload, secret) {
-  const header = {
-    alg: 'HS256',
-    typ: 'JWT'
-  };
+        log(requestId, `Auth request for user: ${username}`);
 
-  const encodedHeader = base64UrlEncode(JSON.stringify(header));
-  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
-  const message = `${encodedHeader}.${encodedPayload}`;
+        // Call WordPress API to validate user
+        const apiUrl = `${env.API_URL}/validate-user`;
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                username,
+                password,
+                random_param: env.RANDOM_PARAM
+            })
+        });
 
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
-  const messageData = encoder.encode(message);
+        const userData = await response.json();
 
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw',
-    keyData,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
+        if (!userData?.userID) {
+            log(requestId, `Auth failed for user: ${username}`);
+            return createResponse(401, 'Invalid credentials');
+        }
 
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    cryptoKey,
-    messageData
-  );
+        // Generate JWT token
+        const token = await generateToken({
+            exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours
+            username: username,
+            userID: userData.userID
+        }, env.JWT_SECRET);
 
-  const encodedSignature = base64UrlEncode(String.fromCharCode(...new Uint8Array(signature)));
-  return `${message}.${encodedSignature}`;
-}
+        log(requestId, `Auth successful for user: ${username}`);
 
-async function verifySignature(token, secret) {
-  const [headerB64, payloadB64, signatureB64] = token.split('.');
-  const message = `${headerB64}.${payloadB64}`;
+        return createResponse(200, null, { token });
 
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
-  const messageData = encoder.encode(message);
-
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw',
-    keyData,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['verify']
-  );
-
-  const signatureData = Uint8Array.from(
-    atob(signatureB64.replace(/-/g, '+').replace(/_/g, '/')),
-    c => c.charCodeAt(0)
-  );
-
-  return crypto.subtle.verify(
-    'HMAC',
-    cryptoKey,
-    signatureData,
-    messageData
-  );
+    } catch (error) {
+        log(requestId, `Auth error: ${error.message}`);
+        return createResponse(500, error.message);
+    }
 }
 
 export async function verifyAuth(request, secret) {
-  const authHeader = request.headers.get('Authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    throw new Error('Unauthorized');
-  }
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+        throw new Error('Unauthorized');
+    }
 
-  const token = authHeader.split(' ')[1];
-  const [headerB64, payloadB64, signatureB64] = token.split('.');
-
-  if (!headerB64 || !payloadB64 || !signatureB64) {
-    throw new Error('Invalid token format');
-  }
-
-  // Verify signature
-  const isValid = await verifySignature(token, secret);
-  if (!isValid) {
-    throw new Error('Invalid token signature');
-  }
-
-  // Check expiration
-  const payload = JSON.parse(base64UrlDecode(payloadB64));
-  if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-    throw new Error('Token expired');
-  }
-
-  return payload;
+    const token = authHeader.split(' ')[1];
+    const { userID } = await verifyJWT(token, secret);
+    return parseInt(userID);
 }
 
-export async function handleAuth(request, env, requestId) {
-  try {
-    const { username, password } = await request.json();
+async function generateToken(payload, secret) {
+    const header = {
+        alg: 'HS256',
+        typ: 'JWT'
+    };
 
-    if (!username || !password) {
-      log(requestId, 'Missing credentials');
-      return createResponse(400, 'Username and password required');
+    const encodedHeader = base64UrlEncode(JSON.stringify(header));
+    const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+    const message = `${encodedHeader}.${encodedPayload}`;
+
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const messageData = encoder.encode(message);
+
+    const cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        keyData,
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign']
+    );
+
+    const signature = await crypto.subtle.sign(
+        'HMAC',
+        cryptoKey,
+        messageData
+    );
+
+    const encodedSignature = base64UrlEncode(String.fromCharCode(...new Uint8Array(signature)));
+    return `${message}.${encodedSignature}`;
+}
+
+async function verifyJWT(token, secret) {
+    const [headerB64, payloadB64, signatureB64] = token.split('.');
+
+    if (!headerB64 || !payloadB64 || !signatureB64) {
+        throw new Error('Invalid token format');
     }
 
-    log(requestId, `Auth request for user: ${username}`);
+    // Verify signature
+    const message = `${headerB64}.${payloadB64}`;
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const messageData = encoder.encode(message);
 
-    // Call MediSwiss API to validate user
-    const userData = await validateUser(username, password, env.RANDOM_PARAM, requestId);
+    const cryptoKey = await crypto.subtle.importKey(
+        'raw',
+        keyData,
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['verify']
+    );
 
-    if (!userData?.userID) {
-      log(requestId, `Auth failed for user: ${username}`);
-      return createResponse(401, 'Invalid credentials');
+    const signatureData = Uint8Array.from(
+        atob(signatureB64.replace(/-/g, '+').replace(/_/g, '/')),
+        c => c.charCodeAt(0)
+    );
+
+    const isValid = await crypto.subtle.verify(
+        'HMAC',
+        cryptoKey,
+        signatureData,
+        messageData
+    );
+
+    if (!isValid) {
+        throw new Error('Invalid token signature');
     }
 
-    // Generate JWT token
-    const token = await generateToken({
-      exp: Math.floor(Date.now() / 1000) + config.jwt.expiryTime,
-      username: username,
-      userID: userData.userID
-    }, env.JWT_SECRET);
+    // Decode payload
+    const payload = JSON.parse(atob(payloadB64.replace(/-/g, '+').replace(/_/g, '/')));
 
-    log(requestId, `Auth successful for user: ${username}`);
+    // Check expiration
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
+        throw new Error('Token expired');
+    }
 
-    return createResponse(200, null, { token });
+    return payload;
+}
 
-  } catch (error) {
-    log(requestId, `Auth error: ${error.message}`);
-    return createResponse(500, error.message);
-  }
+function base64UrlEncode(str) {
+    return btoa(str)
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
 }

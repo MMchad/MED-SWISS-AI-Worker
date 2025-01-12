@@ -7,6 +7,12 @@ compatibility_date = "2024-01-06"
 [observability.logs]
 enabled = true
 
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "mediswiss-ai"
+database_id = "bc11cda9-6298-4986-a41d-886fbf24cb92"
+
 # Public variables
 [vars]
 API_URL = "https://mediswiss.ai/wp-json/custom/v1"
