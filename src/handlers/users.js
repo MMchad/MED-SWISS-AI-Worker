@@ -1,6 +1,7 @@
 // handlers/users.js
 import { createResponse, log } from '../utils/utils';
 
+
 export async function checkQuota(userId, increment, env, requestId) {
     try {
         // Get user and plan info using userId
@@ -19,29 +20,69 @@ export async function checkQuota(userId, increment, env, requestId) {
         }
 
         // Check if user has reached their quota
-        if (user.used_requests + increment >= user.total_requests) {
+        if (user.used_requests + increment > user.total_requests) {
             throw new Error('Request quota exceeded');
         }
 
         // Increment used requests
         await env.DB
-            .prepare('UPDATE users SET used_requests = used_requests + '+increment+' WHERE id = ?')
-            .bind(userId)
+            .prepare('UPDATE users SET used_requests = used_requests + ? WHERE id = ?')
+            .bind(increment, userId)
             .run();
 
-        const remainingRequests = user.total_requests - (user.used_requests + increment);
+        const usedRequests = user.used_requests + increment;
+        const remainingRequests = user.total_requests - usedRequests;
+        
         log(requestId, `Updated user quota`, {
             userId,
+            usedRequests,
+            totalRequests: user.total_requests,
             remainingRequests
         });
 
         return {
             success: true,
+            usedRequests,
+            totalRequests: user.total_requests,
             remainingRequests
         };
     } catch (error) {
         log(requestId, `Quota check error: ${error.message}`);
         throw error;
+    }
+}
+
+export async function handleQuotaCheck(request, env, userId, requestId) {
+    try {
+        // Get user and plan info
+        const user = await env.DB
+            .prepare(`
+                SELECT users.*, plans.total_requests 
+                FROM users 
+                JOIN plans ON users.plan_id = plans.plan_id 
+                WHERE users.id = ?
+            `)
+            .bind(userId)
+            .first();
+
+        if (!user) {
+            return createResponse(404, 'User not found');
+        }
+
+        const quota = {
+            used: user.used_requests,
+            total: user.total_requests,
+            remaining: user.total_requests - user.used_requests,
+            resetDate: user.reset_date
+        };
+
+        log(requestId, `Quota check for user ${userId}`, quota);
+
+        return createResponse(200, null, { quota });
+        
+    } catch (error) {
+        log(requestId, `Quota check error: ${error.message}`);
+        return createResponse(500, error.message);
     }
 }
 

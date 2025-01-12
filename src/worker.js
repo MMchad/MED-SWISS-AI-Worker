@@ -4,6 +4,7 @@ import { verifyAuth,handleAuth } from './handlers/auth';
 import { handleUserUpdate } from './handlers/users';
 import { handleAnalysis } from './handlers/analysis';
 import { createResponse, log } from './utils/utils';
+import { handleQuotaCheck } from './handlers/users';
 
 export default {
     async fetch(request, env, ctx) {
@@ -38,6 +39,11 @@ export default {
             } catch (error) {
                 log(requestId, `Auth error: ${error.message}`);
                 return createResponse(401, error.message);
+            }
+
+             // Handle quota check endpoint
+            if (url.pathname === '/quota' && request.method === 'GET') {
+                return handleQuotaCheck(request, env, userId, requestId);
             }
 
             // Analysis endpoint
