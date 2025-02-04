@@ -3,49 +3,106 @@ import { createResponse, log } from '../utils/utils';
 
 export async function handleAuth(request, env, requestId) {
     try {
-        const { username, password } = await request.json();
+        // Log the incoming request
+        log(requestId, 'Auth request received', {
+            headers: Object.fromEntries(request.headers),
+            url: request.url
+        });
+
+        const body = await request.json();
+        log(requestId, 'Request body:', { 
+            username: body.username,
+            hasPassword: !!body.password 
+        });
+
+        const { username, password } = body;
 
         if (!username || !password) {
             log(requestId, 'Missing credentials');
             return createResponse(400, 'Username and password required');
         }
 
-        log(requestId, `Auth request for user: ${username}`);
+        // Log WordPress API call details and request body
+        const wpUrl = `${env.API_URL}/validate-user`;
+        const requestBody = {
+            username,
+            password,
+            random_param: env.RANDOM_PARAM
+        };
 
-        // Call WordPress API to validate user
-        const apiUrl = `${env.API_URL}/validate-user`;
-        const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                username,
-                password,
-                random_param: env.RANDOM_PARAM
-            })
+        log(requestId, 'Making WordPress API call', { 
+            url: wpUrl,
+            requestBody: { ...requestBody, password: '[REDACTED]' },
+            randomParamExists: !!env.RANDOM_PARAM,
+            randomParamValue: env.RANDOM_PARAM
         });
 
-        const userData = await response.json();
+        try {
+            // Call WordPress API to validate user
+            const response = await fetch(wpUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            });
 
-        if (!userData?.userID) {
-            log(requestId, `Auth failed for user: ${username}`);
-            return createResponse(401, 'Invalid credentials');
+            // Log response status and headers
+            log(requestId, 'WordPress API response received', {
+                status: response.status,
+                statusText: response.statusText,
+                headers: Object.fromEntries(response.headers),
+                type: response.type,
+                url: response.url
+            });
+
+            // Get response as text first
+            const responseText = await response.text();
+            log(requestId, 'WordPress API response body:', responseText);
+
+            // Try to parse JSON
+            let userData;
+            try {
+                userData = JSON.parse(responseText);
+                log(requestId, 'Parsed response data:', userData);
+            } catch (e) {
+                log(requestId, 'Failed to parse response as JSON', {
+                    error: e.message,
+                    responsePreview: responseText.substring(0, 200) // First 200 chars
+                });
+                return createResponse(500, 'Invalid response from WordPress API');
+            }
+
+            if (!userData?.userID) {
+                log(requestId, 'Auth failed - no userID in response', userData);
+                return createResponse(401, 'Invalid credentials');
+            }
+
+            // Generate JWT token
+            const token = await generateToken({
+                exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60),
+                username: username,
+                userID: userData.userID
+            }, env.JWT_SECRET);
+
+            log(requestId, 'Auth successful, token generated');
+
+            return createResponse(200, null, { token });
+
+        } catch (error) {
+            log(requestId, 'WordPress API call failed', {
+                error: error.message,
+                stack: error.stack
+            });
+            return createResponse(500, 'Failed to connect to WordPress API');
         }
 
-        // Generate JWT token
-        const token = await generateToken({
-            exp: Math.floor(Date.now() / 1000) + (24 * 60 * 60), // 24 hours
-            username: username,
-            userID: userData.userID
-        }, env.JWT_SECRET);
-
-        log(requestId, `Auth successful for user: ${username}`);
-
-        return createResponse(200, null, { token });
-
     } catch (error) {
-        log(requestId, `Auth error: ${error.message}`);
+        log(requestId, 'Fatal auth error', {
+            error: error.message,
+            stack: error.stack,
+            type: error.constructor.name
+        });
         return createResponse(500, error.message);
     }
 }

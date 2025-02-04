@@ -29,8 +29,14 @@ export async function handleAnalysis(request, env, userId, requestId) {
         log(requestId, 'Starting analysis', { userId, actions, style, gender });
 
         // Prepare formatted text by explicitly including style and gender
-        const formattedText = `Style: ${style}\nGender: ${gender}\n\n${text}`;
+        const formattedText = [
+            style !== 'default' ? `Style: ${style}` : null,
+            gender !== 'default' ? `Gender: ${gender}` : null,
+            text
+        ].filter(Boolean).join('\n\n');
 
+        log("HERE : " + formattedText);
+        
         // Process actions concurrently
         const results = await Promise.all(
             lowerActions.map(action =>

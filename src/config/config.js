@@ -26,7 +26,7 @@ export const config = {
     },
 
     jwt: {
-        expiryTime: 60 * 60 * 24 // 24 hours
+        expiryTime: 60 * 60 * 24 * 7// 24 hours
     },
 
     analysisTypes: ['anamnese', 'diagnosis', 'treatment']
