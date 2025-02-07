@@ -110,44 +110,25 @@ export async function handleAuth(request, env, requestId) {
 export async function verifyAuth(request, secret) {
     const authHeader = request.headers.get('Authorization');
     if (!authHeader?.startsWith('Bearer ')) {
-        throw new Error('Unauthorized');
+        throw new Error('Unauthorized - Invalid auth header');
     }
 
     const token = authHeader.split(' ')[1];
-    const { userID } = await verifyJWT(token, secret);
-    return parseInt(userID);
-}
-
-async function generateToken(payload, secret) {
-    const header = {
-        alg: 'HS256',
-        typ: 'JWT'
-    };
-
-    const encodedHeader = base64UrlEncode(JSON.stringify(header));
-    const encodedPayload = base64UrlEncode(JSON.stringify(payload));
-    const message = `${encodedHeader}.${encodedPayload}`;
-
-    const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
-    const messageData = encoder.encode(message);
-
-    const cryptoKey = await crypto.subtle.importKey(
-        'raw',
-        keyData,
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign']
-    );
-
-    const signature = await crypto.subtle.sign(
-        'HMAC',
-        cryptoKey,
-        messageData
-    );
-
-    const encodedSignature = base64UrlEncode(String.fromCharCode(...new Uint8Array(signature)));
-    return `${message}.${encodedSignature}`;
+    try {
+        const payload = await verifyJWT(token, secret);
+        // Check for both possible user ID formats
+        const userId = payload.userID || payload.user_id || payload.userId || payload.sub;
+        
+        if (!userId) {
+            log('Missing user ID in token payload:', Object.keys(payload));
+            throw new Error('Invalid token - missing user ID');
+        }
+        
+        return parseInt(userId);
+    } catch (error) {
+        log('Auth verification failed:', error, 'Payload keys:', error.payloadKeys);
+        throw new Error('Unauthorized - Invalid token');
+    }
 }
 
 async function verifyJWT(token, secret) {
@@ -158,10 +139,10 @@ async function verifyJWT(token, secret) {
     }
 
     // Verify signature
-    const message = `${headerB64}.${payloadB64}`;
     const encoder = new TextEncoder();
-    const keyData = encoder.encode(secret);
+    const message = `${headerB64}.${payloadB64}`;
     const messageData = encoder.encode(message);
+    const keyData = encoder.encode(secret);
 
     const cryptoKey = await crypto.subtle.importKey(
         'raw',

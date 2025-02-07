@@ -1,6 +1,6 @@
 // worker.js
 import { config } from './config/config';
-import { verifyAuth,handleAuth } from './handlers/auth';
+import { verifyAuth } from './handlers/auth';
 import { handleUserUpdate } from './handlers/users';
 import { handleAnalysis } from './handlers/analysis';
 import { createResponse, log } from './utils/utils';
@@ -20,19 +20,13 @@ export default {
             }
 
             const url = new URL(request.url);
-
             
-            // Public routes
-            if (url.pathname === '/auth' && request.method === 'POST') {
-                return handleAuth(request, env, requestId);
-            }
-
             // User management endpoint (requires API key)
             if (url.pathname === '/user/plan' && request.method === 'POST') {
                 return handleUserUpdate(request, env, requestId);
             }
 
-            // Protected routes - verify authentication
+            // All other endpoints require JWT verification
             let userId;
             try {
                 userId = await verifyAuth(request, env.JWT_SECRET);
@@ -41,9 +35,13 @@ export default {
                 return createResponse(401, error.message);
             }
 
-             // Handle quota check endpoint
+            // Handle quota check endpoint
             if (url.pathname === '/quota' && request.method === 'GET') {
-                return handleQuotaCheck(request, env, userId, requestId);
+                // Get user ID from token verification
+                if (!userId) {
+                    return createResponse(401, 'Unauthorized - Missing user ID');
+                }
+                return handleQuotaCheck(request, env, parseInt(userId), requestId);
             }
 
             // Analysis endpoint
