@@ -11,7 +11,7 @@ export const config = {
         openai: {
             baseUrl: 'https://api.openai.com/v1',
             assistants: {
-                'anamnese': 'asst_QoRRQsecxfFS1gqXi3sXvY0W',
+                'anamnese': 'asst_qHfCO37giEaJzEDLIFPDxZX4',
                 'diagnosis': 'asst_Ij3sCQ2oFQmUSiKYiHQLesVL',
                 'treatment': 'asst_fOJd3utMyRemVKNBZC4XDntK'
             }
