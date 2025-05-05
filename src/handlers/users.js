@@ -32,7 +32,7 @@ export async function checkQuota(userId, increment, env, requestId) {
 
         const usedRequests = user.used_requests + increment;
         const remainingRequests = user.total_requests - usedRequests;
-        
+
         log(requestId, `Updated user quota`, {
             userId,
             usedRequests,
@@ -79,7 +79,7 @@ export async function handleQuotaCheck(request, env, userId, requestId) {
         log(requestId, `Quota check for user ${userId}`, quota);
 
         return createResponse(200, null, { quota });
-        
+
     } catch (error) {
         log(requestId, `Quota check error: ${error.message}`);
         return createResponse(500, error.message);
@@ -127,7 +127,7 @@ export async function handleUserUpdate(request, env, requestId) {
         // Calculate next reset date (30 days from now)
         const now = new Date();
         const resetDate = new Date(now.getTime() + (30 * 24 * 60 * 60 * 1000));
-        
+
         try {
             // Check if user exists using userId
             const existingUser = await env.DB
@@ -138,8 +138,8 @@ export async function handleUserUpdate(request, env, requestId) {
             if (existingUser) {
                 // Update existing user's plan and email
                 await env.DB
-                    .prepare('UPDATE users SET plan_id = ?, email = ?, reset_date = ? WHERE id = ?')
-                    .bind(planIdNum, email, resetDate.toISOString(), userIdNum)
+                    .prepare('UPDATE users SET used_request = ?. plan_id = ?, email = ?, reset_date = ? WHERE id = ?')
+                    .bind(0, planIdNum, email, resetDate.toISOString(), userIdNum)
                     .run();
 
                 log(requestId, `Updated user plan and email`, {
